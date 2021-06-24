@@ -25,6 +25,7 @@
 #if !defined(CURL_DISABLE_CRYPTO_AUTH)
 
 #include "curl_md4.h"
+#include "curl_hmac.h"
 #include "warnless.h"
 
 
@@ -502,6 +503,21 @@ static void MD4_Final(unsigned char *result, MD4_CTX *ctx)
 
 #endif /* CRYPTO LIBS */
 
+const struct MD4_params Curl_DIGEST_MD4[] = {
+  {
+    /* Digest initialization function */
+    CURLX_FUNCTION_CAST(Curl_MD4_init_func, MD4_Init),
+    /* Digest update function */
+    CURLX_FUNCTION_CAST(Curl_MD4_update_func, MD4_Update),
+    /* Digest computation end function */
+    CURLX_FUNCTION_CAST(Curl_MD4_final_func, MD4_Final),
+    /* Size of digest context struct */
+    sizeof(MD4_CTX),
+    /* Result size */
+    16
+  }
+};
+
 void Curl_md4it(unsigned char *output, const unsigned char *input,
                 const size_t len)
 {
@@ -511,5 +527,64 @@ void Curl_md4it(unsigned char *output, const unsigned char *input,
   MD4_Update(&ctx, input, curlx_uztoui(len));
   MD4_Final(output, &ctx);
 }
+
+struct MD4_context *Curl_MD4_init(const struct MD4_params *md4params)
+{
+  struct MD4_context *ctxt;
+
+  /* Create MD4 context */
+  ctxt = malloc(sizeof(*ctxt));
+
+  if(!ctxt)
+    return ctxt;
+
+  ctxt->md4_hashctx = malloc(md4params->md4_ctxtsize);
+
+  if(!ctxt->md4_hashctx) {
+    free(ctxt);
+    return NULL;
+  }
+
+  ctxt->md4_hash = md4params;
+
+  (*md4params->md4_init_func)(ctxt->md4_hashctx);
+  return ctxt;
+}
+
+CURLcode Curl_MD4_update(struct MD4_context *context,
+                         const unsigned char *data,
+                         unsigned int len)
+{
+  (*context->md4_hash->md4_update_func)(context->md4_hashctx, data, len);
+
+  return CURLE_OK;
+}
+
+CURLcode Curl_MD4_final(struct MD4_context *context, unsigned char *result)
+{
+  (*context->md4_hash->md4_final_func)(result, context->md4_hashctx);
+
+  free(context->md4_hashctx);
+  free(context);
+
+  return CURLE_OK;
+}
+
+const struct HMAC_params Curl_HMAC_MD4[] = {
+  {
+    /* Hash initialization function. */
+    CURLX_FUNCTION_CAST(HMAC_hinit_func, MD4_Init),
+    /* Hash update function. */
+    CURLX_FUNCTION_CAST(HMAC_hupdate_func, MD4_Update),
+    /* Hash computation end function. */
+    CURLX_FUNCTION_CAST(HMAC_hfinal_func, MD4_Final),
+    /* Size of hash context structure. */
+    sizeof(MD4_CTX),
+    /* Maximum key length. */
+    64,
+    /* Result size. */
+    16
+  }
+};
 
 #endif /* CURL_DISABLE_CRYPTO_AUTH */
