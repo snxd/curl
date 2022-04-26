@@ -228,7 +228,7 @@ CURL_EXTERN CURLMcode curl_multi_perform(CURLM *multi_handle,
  *
  * Returns: CURLMcode type, general multi error code.
  */
-CURL_EXTERN CURLMcode curl_multi_count_connections(struct Curl_multi *multi,
+CURL_EXTERN CURLMcode curl_multi_count_connections(CURLM *multi_handle,
                                                    int *connections);
  /*
   * Name:    curl_multi_cleanup()
