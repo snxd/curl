@@ -53,8 +53,8 @@ struct MD4_context {
 extern const struct MD4_params Curl_DIGEST_MD4[1];
 extern const struct HMAC_params Curl_HMAC_MD4[1];
 
-void Curl_md4it(unsigned char *output, const unsigned char *input,
-                const size_t len);
+CURLcode Curl_md4it(unsigned char *output, const unsigned char *input,
+                    const size_t len);
 
 struct MD4_context *Curl_MD4_init(const struct MD4_params *md4params);
 CURLcode Curl_MD4_update(struct MD4_context *context,
