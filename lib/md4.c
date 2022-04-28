@@ -66,20 +66,20 @@
 /* The last #include file should be: */
 #include "memdebug.h"
 
-typedef struct md4_ctx MD4_CTX;
+typedef struct md4_ctx my_md4_ctx;
 
-static CURLcode MD4_Init(MD4_CTX *ctx)
+static CURLcode my_md4_init(my_md4_ctx *ctx)
 {
   md4_init(ctx);
   return CURLE_OK;
 }
 
-static void MD4_Update(MD4_CTX *ctx, const void *data, unsigned long size)
+static void my_md4_update(my_md4_ctx *ctx, const void *data, unsigned int len)
 {
-  md4_update(ctx, size, data);
+  md4_update(ctx, len, data);
 }
 
-static void MD4_Final(unsigned char *result, MD4_CTX *ctx)
+static void my_md4_final(unsigned char *result, my_md4_ctx *ctx)
 {
   md4_digest(ctx, MD4_DIGEST_SIZE, result);
 }
@@ -88,6 +88,26 @@ static void MD4_Final(unsigned char *result, MD4_CTX *ctx)
       !defined(OPENSSL_NO_MD4)
 /* When OpenSSL or wolfSSL is available, we use their MD4 functions. */
 #include <openssl/md4.h>
+
+typedef MD4_CTX my_md4_ctx;
+
+static CURLcode my_md4_init(my_md4_ctx *ctx)
+{
+  if(!MD4_Init(ctx))
+    return CURLE_OUT_OF_MEMORY;
+
+  return CURLE_OK;
+}
+
+static void my_md4_update(my_md4_ctx *ctx, const void *data, unsigned int len)
+{
+    (void)MD4_Update(ctx, data, len);
+}
+
+static void my_md4_final(unsigned char *result, my_md4_ctx *ctx)
+{
+    (void)MD4_Final(result, ctx);
+}
 
 #elif (defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && \
               (__MAC_OS_X_VERSION_MAX_ALLOWED >= 1040) && \
@@ -103,20 +123,22 @@ static void MD4_Final(unsigned char *result, MD4_CTX *ctx)
 /* The last #include file should be: */
 #include "memdebug.h"
 
-typedef CC_MD4_CTX MD4_CTX;
+typedef CC_MD4_CTX my_md4_ctx;
 
-static CURLcode MD4_Init(MD4_CTX *ctx)
+static CURLcode my_md4_init(my_md4_ctx *ctx)
 {
-  (void)CC_MD4_Init(ctx);
+  if(!CC_MD4_Init(ctx))
+    return CURLE_OUT_OF_MEMORY;
+
   return CURLE_OK;
 }
 
-static void MD4_Update(MD4_CTX *ctx, const void *data, unsigned long size)
+static void my_md4_update(my_md4_ctx *ctx, const void *data, unsigned int len)
 {
-  (void)CC_MD4_Update(ctx, data, (CC_LONG)size);
+  (void)CC_MD4_Update(ctx, data, (CC_LONG)len);
 }
 
-static void MD4_Final(unsigned char *result, MD4_CTX *ctx)
+static void my_md4_final(unsigned char *result, my_md4_ctx *ctx)
 {
   (void)CC_MD4_Final(result, ctx);
 }
@@ -134,18 +156,18 @@ struct md4_ctx {
   HCRYPTPROV hCryptProv;
   HCRYPTHASH hHash;
 };
-typedef struct md4_ctx MD4_CTX;
+typedef struct md4_ctx my_md4_ctx;
 
-static CURLcode MD4_Init(MD4_CTX *ctx)
+static CURLcode my_md4_init(my_md4_ctx *ctx)
 {
   ctx->hCryptProv = 0;
   ctx->hHash = 0;
 
   if(!CryptAcquireContext(&ctx->hCryptProv, NULL, NULL, PROV_RSA_FULL,
-                         CRYPT_VERIFYCONTEXT | CRYPT_SILENT))
+                          CRYPT_VERIFYCONTEXT | CRYPT_SILENT))
     return CURLE_OUT_OF_MEMORY;
 
-  if (!CryptCreateHash(ctx->hCryptProv, CALG_MD4, 0, 0, &ctx->hHash)) {
+  if(!CryptCreateHash(ctx->hCryptProv, CALG_MD4, 0, 0, &ctx->hHash)) {
     CryptReleaseContext(ctx->hCryptProv, 0);
     return CURLE_OUT_OF_MEMORY;
   }
@@ -153,12 +175,12 @@ static CURLcode MD4_Init(MD4_CTX *ctx)
   return CURLE_OK;
 }
 
-static void MD4_Update(MD4_CTX *ctx, const void *data, unsigned long size)
+static void my_md4_update(my_md4_ctx *ctx, const void *data, unsigned int len)
 {
-  CryptHashData(ctx->hHash, (BYTE *)data, (unsigned int) size, 0);
+  CryptHashData(ctx->hHash, (BYTE *)data, len, 0);
 }
 
-static void MD4_Final(unsigned char *result, MD4_CTX *ctx)
+static void my_md4_final(unsigned char *result, my_md4_ctx *ctx)
 {
   unsigned long length = 0;
 
@@ -184,30 +206,29 @@ static void MD4_Final(unsigned char *result, MD4_CTX *ctx)
 
 struct md4_ctx {
   void *data;
-  unsigned long size;
+  unsigned int size;
 };
-typedef struct md4_ctx MD4_CTX;
+typedef struct md4_ctx my_md4_ctx;
 
-static CURLcode MD4_Init(MD4_CTX *ctx)
+static CURLcode my_md4_init(my_md4_ctx *ctx)
 {
   ctx->data = NULL;
   ctx->size = 0;
-
   return CURLE_OK;
 }
 
-static void MD4_Update(MD4_CTX *ctx, const void *data, unsigned long size)
+static void my_md4_update(my_md4_ctx *ctx, const void *data, int len)
 {
   if(!ctx->data) {
-    ctx->data = malloc(size);
+    ctx->data = malloc(len);
     if(ctx->data) {
-      memcpy(ctx->data, data, size);
-      ctx->size = size;
+      memcpy(ctx->data, data, len);
+      ctx->size = len;
     }
   }
 }
 
-static void MD4_Final(unsigned char *result, MD4_CTX *ctx)
+static void my_md4_final(unsigned char *result, my_md4_ctx *ctx)
 {
   if(ctx->data) {
 #if !defined(HAS_MBEDTLS_RESULT_CODE_BASED_FUNCTIONS)
@@ -273,11 +294,11 @@ struct md4_ctx {
   unsigned char buffer[64];
   MD4_u32plus block[16];
 };
-typedef struct md4_ctx MD4_CTX;
+typedef struct md4_ctx my_md4_ctx;
 
-static CURLcode MD4_Init(MD4_CTX *ctx);
-static void MD4_Update(MD4_CTX *ctx, const void *data, unsigned long size);
-static void MD4_Final(unsigned char *result, MD4_CTX *ctx);
+static CURLcode my_md4_init(my_md4_ctx *ctx);
+static void my_md4_update(my_md4_ctx *ctx, const void *data, unsigned int len);
+static void my_md4_final(unsigned char *result, my_md4_ctx *ctx);
 
 /*
  * The basic MD4 functions.
@@ -324,7 +345,7 @@ static void MD4_Final(unsigned char *result, MD4_CTX *ctx);
  * This processes one or more 64-byte data blocks, but does NOT update
  * the bit counters.  There are no alignment requirements.
  */
-static const void *body(MD4_CTX *ctx, const void *data, unsigned long size)
+static const void *body(my_md4_ctx *ctx, const void *data, unsigned long size)
 {
   const unsigned char *ptr;
   MD4_u32plus a, b, c, d;
@@ -414,7 +435,7 @@ static const void *body(MD4_CTX *ctx, const void *data, unsigned long size)
   return ptr;
 }
 
-static CURLcode MD4_Init(MD4_CTX *ctx)
+static CURLcode my_md4_init(my_md4_ctx *ctx)
 {
   ctx->a = 0x67452301;
   ctx->b = 0xefcdab89;
@@ -427,42 +448,42 @@ static CURLcode MD4_Init(MD4_CTX *ctx)
   return CURLE_OK;
 }
 
-static void MD4_Update(MD4_CTX *ctx, const void *data, unsigned long size)
+static void my_md4_update(my_md4_ctx *ctx, const void *data, unsigned int len)
 {
   MD4_u32plus saved_lo;
   unsigned long used;
 
   saved_lo = ctx->lo;
-  ctx->lo = (saved_lo + size) & 0x1fffffff;
+  ctx->lo = (saved_lo + len) & 0x1fffffff;
   if(ctx->lo < saved_lo)
     ctx->hi++;
-  ctx->hi += (MD4_u32plus)size >> 29;
+  ctx->hi += (MD4_u32plus)len >> 29;
 
   used = saved_lo & 0x3f;
 
   if(used) {
     unsigned long available = 64 - used;
 
-    if(size < available) {
-      memcpy(&ctx->buffer[used], data, size);
+    if(len < available) {
+      memcpy(&ctx->buffer[used], data, len);
       return;
     }
 
     memcpy(&ctx->buffer[used], data, available);
     data = (const unsigned char *)data + available;
-    size -= available;
+    len -= available;
     body(ctx, ctx->buffer, 64);
   }
 
-  if(size >= 64) {
-    data = body(ctx, data, size & ~(unsigned long)0x3f);
-    size &= 0x3f;
+  if(len >= 64) {
+    data = body(ctx, data, len & ~(unsigned long)0x3f);
+    len &= 0x3f;
   }
 
-  memcpy(ctx->buffer, data, size);
+  memcpy(ctx->buffer, data, len);
 }
 
-static void MD4_Final(unsigned char *result, MD4_CTX *ctx)
+static void my_md4_final(unsigned char *result, my_md4_ctx *ctx)
 {
   unsigned long used, available;
 
@@ -518,31 +539,28 @@ static void MD4_Final(unsigned char *result, MD4_CTX *ctx)
 const struct MD4_params Curl_DIGEST_MD4[] = {
   {
     /* Digest initialization function */
-    CURLX_FUNCTION_CAST(Curl_MD4_init_func, MD4_Init),
+    CURLX_FUNCTION_CAST(Curl_MD4_init_func, my_md4_init),
     /* Digest update function */
-    CURLX_FUNCTION_CAST(Curl_MD4_update_func, MD4_Update),
+    CURLX_FUNCTION_CAST(Curl_MD4_update_func, my_md4_update),
     /* Digest computation end function */
-    CURLX_FUNCTION_CAST(Curl_MD4_final_func, MD4_Final),
+    CURLX_FUNCTION_CAST(Curl_MD4_final_func, my_md4_final),
     /* Size of digest context struct */
-    sizeof(MD4_CTX),
+    sizeof(my_md4_ctx),
     /* Result size */
     16
   }
 };
 
-/*
- * Returns CURLE_OK on success.
- */
 CURLcode Curl_md4it(unsigned char *output, const unsigned char *input,
                     const size_t len)
 {
   CURLcode result;
-  MD4_CTX ctx;
-  
-  result = MD4_Init(&ctx);
+  my_md4_ctx ctx;
+
+  result = my_md4_init(&ctx);
   if(!result) {
-    MD4_Update(&ctx, input, curlx_uztoui(len));
-    MD4_Final(output, &ctx);
+    my_md4_update(&ctx, input, curlx_uztoui(len));
+    my_md4_final(output, &ctx);
   }
   return result;
 }
@@ -571,7 +589,6 @@ struct MD4_context *Curl_MD4_init(const struct MD4_params *md4params)
     free(ctxt);
     return NULL;
   }
-
   return ctxt;
 }
 
@@ -597,13 +614,13 @@ CURLcode Curl_MD4_final(struct MD4_context *context, unsigned char *result)
 const struct HMAC_params Curl_HMAC_MD4[] = {
   {
     /* Hash initialization function. */
-    CURLX_FUNCTION_CAST(HMAC_hinit_func, MD4_Init),
+    CURLX_FUNCTION_CAST(HMAC_hinit_func, my_md4_init),
     /* Hash update function. */
-    CURLX_FUNCTION_CAST(HMAC_hupdate_func, MD4_Update),
+    CURLX_FUNCTION_CAST(HMAC_hupdate_func, my_md4_update),
     /* Hash computation end function. */
-    CURLX_FUNCTION_CAST(HMAC_hfinal_func, MD4_Final),
+    CURLX_FUNCTION_CAST(HMAC_hfinal_func, my_md4_final),
     /* Size of hash context structure. */
-    sizeof(MD4_CTX),
+    sizeof(my_md4_ctx),
     /* Maximum key length. */
     64,
     /* Result size. */
