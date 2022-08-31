@@ -3014,10 +3014,16 @@ CURLcode Curl_http_firstwrite(struct Curl_easy *data,
     k->ignorebody = TRUE;
     infof(data, "Ignoring the response-body");
   }
+
   if(data->state.resume_from && !k->content_range &&
      (data->state.httpreq == HTTPREQ_GET) &&
      !k->ignorebody) {
 
+    if(!(200 <= data->info.httpcode && data->info.httpcode < 300)) {
+      /* We wanted to resume a download, but the server doesn't respond with a
+       * successful code, we don't know if the server supports byte ranges */
+      return CURLE_OK;
+    }
     if(k->size == data->state.resume_from) {
       /* The resume point is at the end of file, consider this fine even if it
          doesn't allow resume from here. */
