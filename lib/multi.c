@@ -2809,6 +2809,23 @@ CURLMcode curl_multi_perform(CURLM *m, int *running_handles)
   return returncode;
 }
 
+CURLMcode curl_multi_count_connections(CURLM *m, int *connections)
+{
+  struct Curl_multi *multi = m;
+  struct Curl_llist_node *e;
+
+  if(!GOOD_MULTI_HANDLE(multi))
+    return CURLM_BAD_HANDLE;
+
+  *connections = 0;
+  for(e = Curl_llist_head(&multi->process); e; e = Curl_node_next(e)) {
+    struct Curl_easy *data = Curl_node_elem(e);
+    if(data->mstate != MSTATE_CONNECT && data->mstate != MSTATE_SETUP)
+      (*connections)++;
+  }
+  return CURLM_OK;
+}
+
 /* unlink_all_msgsent_handles() moves all nodes back from the msgsent list to
    the process list */
 static void unlink_all_msgsent_handles(struct Curl_multi *multi)
