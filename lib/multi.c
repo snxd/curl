@@ -2811,6 +2811,24 @@ CURLMcode curl_multi_perform(struct Curl_multi *multi, int *running_handles)
   return returncode;
 }
 
+CURLMcode curl_multi_count_connections(struct Curl_multi *multi,
+                                       int *connections)
+{
+  struct Curl_easy *data;
+
+  if(!GOOD_MULTI_HANDLE(multi))
+    return CURLM_BAD_HANDLE;
+
+  *connections = 0;
+  for(data = multi->easyp; data; data = data->next){
+    if((data->mstate != MSTATE_PENDING) &&
+       (data->mstate != MSTATE_CONNECT || !data->state.previouslypending)) {
+      (*connections)++;
+    }
+  }
+  return CURLM_OK;
+}
+
 /* unlink_all_msgsent_handles() detaches all those easy handles from this
    multi handle */
 static void unlink_all_msgsent_handles(struct Curl_multi *multi)
