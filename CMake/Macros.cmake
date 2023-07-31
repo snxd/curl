@@ -29,7 +29,7 @@
 # order of least-to-most-dependent.  Some libraries depend on others
 # to link correctly.
 macro(check_library_exists_concat LIBRARY SYMBOL VARIABLE)
-  check_library_exists("${LIBRARY};${CURL_LIBS}" ${SYMBOL} "${CMAKE_LIBRARY_PATH}"
+  check_library_exists("${LIBRARY}" ${SYMBOL} "${CMAKE_LIBRARY_PATH}"
     ${VARIABLE})
   if(${VARIABLE})
     set(CURL_LIBS ${LIBRARY} ${CURL_LIBS})
