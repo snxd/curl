@@ -148,6 +148,7 @@
 
 struct st_ssl_backend_data {
   SSLContextRef ssl_ctx;
+  curl_socket_t ssl_sockfd;
   bool ssl_direction; /* true if writing, false if reading */
   size_t ssl_write_buffered_length;
 };
@@ -830,78 +831,114 @@ static const unsigned char ecDsaSecp384r1SpkiHeader[] = {
 #endif /* SECTRANSP_PINNEDPUBKEY_V1 */
 #endif /* SECTRANSP_PINNEDPUBKEY */
 
-static OSStatus bio_cf_in_read(SSLConnectionRef connection,
-                               void *buf,
-                               size_t *dataLength)  /* IN/OUT */
+/* The following two functions were ripped from Apple sample code,
+ * with some modifications: */
+static OSStatus SocketRead(SSLConnectionRef connection,
+                           void *data,          /* owned by
+                                                 * caller, data
+                                                 * RETURNED */
+                           size_t *dataLength)  /* IN/OUT */
 {
-  struct Curl_cfilter *cf = (struct Curl_cfilter *)connection;
-  struct ssl_connect_data *connssl = cf->ctx;
-  struct st_ssl_backend_data *backend =
-    (struct st_ssl_backend_data *)connssl->backend;
-  struct Curl_easy *data = CF_DATA_CURRENT(cf);
-  ssize_t nread;
-  CURLcode result;
+  size_t bytesToGo = *dataLength;
+  size_t initLen = bytesToGo;
+  UInt8 *currData = (UInt8 *)data;
+  struct ssl_connect_data *connssl = (struct ssl_connect_data *)connection;
+  struct st_ssl_backend_data *backend = connssl->backend;
+  int sock;
   OSStatus rtn = noErr;
+  size_t bytesRead;
+  ssize_t rrtn;
+  int theErr;
 
-  DEBUGASSERT(data);
-  nread = Curl_conn_cf_recv(cf->next, data, buf, *dataLength, &result);
-  DEBUGF(LOG_CF(data, cf, "bio_read(len=%zu) -> %zd, result=%d",
-                *dataLength, nread, result));
-  if(nread < 0) {
-    switch(result) {
-      case CURLE_OK:
-      case CURLE_AGAIN:
-        rtn = errSSLWouldBlock;
-        backend->ssl_direction = false;
-        break;
-      default:
-        rtn = ioErr;
-        break;
+  DEBUGASSERT(backend);
+  sock = backend->ssl_sockfd;
+  *dataLength = 0;
+
+  for(;;) {
+    bytesRead = 0;
+    rrtn = read(sock, currData, bytesToGo);
+    if(rrtn <= 0) {
+      /* this is guesswork... */
+      theErr = errno;
+      if(rrtn == 0) { /* EOF = server hung up */
+        /* the framework will turn this into errSSLClosedNoNotify */
+        rtn = errSSLClosedGraceful;
+      }
+      else /* do the switch */
+        switch(theErr) {
+          case ENOENT:
+            /* connection closed */
+            rtn = errSSLClosedGraceful;
+            break;
+          case ECONNRESET:
+            rtn = errSSLClosedAbort;
+            break;
+          case EAGAIN:
+            rtn = errSSLWouldBlock;
+            backend->ssl_direction = false;
+            break;
+          default:
+            rtn = ioErr;
+            break;
+        }
+      break;
     }
-    nread = 0;
+    else {
+      bytesRead = rrtn;
+    }
+    bytesToGo -= bytesRead;
+    currData  += bytesRead;
+
+    if(bytesToGo == 0) {
+      /* filled buffer with incoming data, done */
+      break;
+    }
   }
-  else if(nread == 0) {
-    rtn = errSSLClosedGraceful;
-  }
-  else if((size_t)nread < *dataLength) {
-    rtn = errSSLWouldBlock;
-  }
-  *dataLength = nread;
+  *dataLength = initLen - bytesToGo;
+
   return rtn;
 }
 
-static OSStatus bio_cf_out_write(SSLConnectionRef connection,
-                                 const void *buf,
-                                 size_t *dataLength)  /* IN/OUT */
+static OSStatus SocketWrite(SSLConnectionRef connection,
+                            const void *data,
+                            size_t *dataLength)  /* IN/OUT */
 {
-  struct Curl_cfilter *cf = (struct Curl_cfilter *)connection;
-  struct ssl_connect_data *connssl = cf->ctx;
-  struct st_ssl_backend_data *backend =
-    (struct st_ssl_backend_data *)connssl->backend;
-  struct Curl_easy *data = CF_DATA_CURRENT(cf);
-  ssize_t nwritten;
-  CURLcode result;
-  OSStatus rtn = noErr;
+  size_t bytesSent = 0;
+  struct ssl_connect_data *connssl = (struct ssl_connect_data *)connection;
+  struct st_ssl_backend_data *backend = connssl->backend;
+  int sock;
+  ssize_t length;
+  size_t dataLen = *dataLength;
+  const UInt8 *dataPtr = (UInt8 *)data;
+  OSStatus ortn;
+  int theErr;
 
-  DEBUGASSERT(data);
-  nwritten = Curl_conn_cf_send(cf->next, data, buf, *dataLength, &result);
-  DEBUGF(LOG_CF(data, cf, "bio_send(len=%zu) -> %zd, result=%d",
-                *dataLength, nwritten, result));
-  if(nwritten <= 0) {
-    if(result == CURLE_AGAIN) {
-      rtn = errSSLWouldBlock;
+  DEBUGASSERT(backend);
+  sock = backend->ssl_sockfd;
+  *dataLength = 0;
+
+  do {
+    length = write(sock,
+                   (char *)dataPtr + bytesSent,
+                   dataLen - bytesSent);
+  } while((length > 0) &&
+           ( (bytesSent += length) < dataLen) );
+
+  if(length <= 0) {
+    theErr = errno;
+    if(theErr == EAGAIN) {
+      ortn = errSSLWouldBlock;
       backend->ssl_direction = true;
     }
     else {
-      rtn = ioErr;
+      ortn = ioErr;
     }
-    nwritten = 0;
   }
-  else if((size_t)nwritten < *dataLength) {
-    rtn = errSSLWouldBlock;
+  else {
+    ortn = noErr;
   }
-  *dataLength = nwritten;
-  return rtn;
+  *dataLength = bytesSent;
+  return ortn;
 }
 
 #ifndef CURL_DISABLE_VERBOSE_STRINGS
@@ -1638,6 +1675,7 @@ static CURLcode sectransp_set_selected_ciphers(struct Curl_easy *data,
 static CURLcode sectransp_connect_step1(struct Curl_cfilter *cf,
                                         struct Curl_easy *data)
 {
+  curl_socket_t sockfd = cf->conn->sock[cf->sockindex];
   struct ssl_connect_data *connssl = cf->ctx;
   struct st_ssl_backend_data *backend =
     (struct st_ssl_backend_data *)connssl->backend;
@@ -2099,13 +2137,18 @@ static CURLcode sectransp_connect_step1(struct Curl_cfilter *cf,
     }
   }
 
-  err = SSLSetIOFuncs(backend->ssl_ctx, bio_cf_in_read, bio_cf_out_write);
+  err = SSLSetIOFuncs(backend->ssl_ctx, SocketRead, SocketWrite);
   if(err != noErr) {
     failf(data, "SSL: SSLSetIOFuncs() failed: OSStatus %d", err);
     return CURLE_SSL_CONNECT_ERROR;
   }
 
-  err = SSLSetConnection(backend->ssl_ctx, cf);
+  /* pass the raw socket into the SSL layers */
+  /* We need to store the FD in a constant memory address, because
+   * SSLSetConnection() will not copy that address. I've found that
+   * conn->sock[sockindex] may change on its own. */
+  backend->ssl_sockfd = sockfd;
+  err = SSLSetConnection(backend->ssl_ctx, connssl);
   if(err != noErr) {
     failf(data, "SSL: SSLSetConnection() failed: %d", err);
     return CURLE_SSL_CONNECT_ERROR;
@@ -3170,6 +3213,7 @@ static void sectransp_close(struct Curl_cfilter *cf, struct Curl_easy *data)
 #endif /* CURL_BUILD_MAC_10_8 || CURL_BUILD_IOS */
     backend->ssl_ctx = NULL;
   }
+  backend->ssl_sockfd = 0;
 }
 
 static int sectransp_shutdown(struct Curl_cfilter *cf,
@@ -3183,7 +3227,6 @@ static int sectransp_shutdown(struct Curl_cfilter *cf,
   int rc;
   char buf[120];
   int loop = 10; /* avoid getting stuck */
-  CURLcode result;
 
   DEBUGASSERT(backend);
 
@@ -3219,10 +3262,12 @@ static int sectransp_shutdown(struct Curl_cfilter *cf,
     /* Something to read, let's do it and hope that it is the close
      notify alert from the server. No way to SSL_Read now, so use read(). */
 
-    nread = Curl_conn_cf_recv(cf->next, data, buf, sizeof(buf), &result);
+    nread = read(cf->conn->sock[cf->sockindex], buf, sizeof(buf));
 
     if(nread < 0) {
-      failf(data, "read: %s", curl_easy_strerror(result));
+      char buffer[STRERROR_LEN];
+      failf(data, "read: %s",
+            Curl_strerror(errno, buffer, sizeof(buffer)));
       rc = -1;
     }
 
@@ -3461,9 +3506,10 @@ const struct Curl_ssl Curl_ssl_sectransp = {
   SSLSUPP_CAINFO_BLOB |
   SSLSUPP_CERTINFO |
 #ifdef SECTRANSP_PINNEDPUBKEY
-  SSLSUPP_PINNEDPUBKEY |
+  SSLSUPP_PINNEDPUBKEY,
+#else
+  0,
 #endif /* SECTRANSP_PINNEDPUBKEY */
-  SSLSUPP_HTTPS_PROXY,
 
   sizeof(struct st_ssl_backend_data),
 
@@ -3477,7 +3523,7 @@ const struct Curl_ssl Curl_ssl_sectransp = {
   Curl_none_cert_status_request,      /* cert_status_request */
   sectransp_connect,                  /* connect */
   sectransp_connect_nonblocking,      /* connect_nonblocking */
-  Curl_ssl_get_select_socks,          /* getsock */
+  Curl_ssl_get_select_socks,                   /* getsock */
   sectransp_get_internals,            /* get_internals */
   sectransp_close,                    /* close_one */
   Curl_none_close_all,                /* close_all */
