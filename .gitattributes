@@ -16,3 +16,6 @@ configure.ac eol=lf
 *.bat text eol=crlf
 *.btm text eol=crlf
 *.cmd text eol=crlf
+
+# Test data contains mixed line endings.
+tests/data/test* binary
