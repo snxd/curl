@@ -462,6 +462,7 @@ static ssize_t Curl_xfer_recv_resp(struct Curl_easy *data,
  */
 static CURLcode readwrite_data(struct Curl_easy *data,
                                struct SingleRequest *k,
+                               struct curltime *nowp,
                                int *didwhat, bool *done)
 {
   struct connectdata *conn = data->conn;
@@ -494,6 +495,14 @@ static CURLcode readwrite_data(struct Curl_easy *data,
 
     /* Observe any imposed speed limit */
     if(bytestoread && data->set.max_recv_speed) {
+      /* make sure not more than the max recv speed bytes downloaded at once */
+      if(data->set.max_recv_speed < (curl_off_t)bytestoread) {
+        const curl_off_t toread = data->set.max_recv_speed -
+          (data->progress.downloaded - data->progress.dl_limit_size) %
+            data->set.max_recv_speed;
+        bytestoread = (size_t)toread;
+      }
+
       curl_off_t net_limit = data->set.max_recv_speed - total_received;
       if(net_limit <= 0)
         break;
@@ -543,6 +552,14 @@ static CURLcode readwrite_data(struct Curl_easy *data,
     /* if we are PAUSEd or stopped receiving, leave the loop */
     if((k->keepon & KEEP_RECV_PAUSE) || !(k->keepon & KEEP_RECV))
       break;
+
+    if(Curl_pgrsLimitWaitTime(data->progress.downloaded,
+                              data->progress.dl_limit_size,
+                              data->set.max_recv_speed,
+                              data->progress.dl_limit_start,
+                              *nowp)) {
+      maxloops = 0;
+    }
 
   } while(maxloops-- && data_pending(data));
 
@@ -609,6 +626,7 @@ static void win_update_buffer_size(curl_socket_t sockfd)
  */
 static CURLcode readwrite_upload(struct Curl_easy *data,
                                  struct connectdata *conn,
+                                 struct curltime *nowp,
                                  int *didwhat)
 {
   ssize_t i, si;
@@ -837,6 +855,13 @@ static CURLcode readwrite_upload(struct Curl_easy *data,
       }
     }
 
+    if(Curl_pgrsLimitWaitTime(data->progress.uploaded,
+                              data->progress.ul_limit_size,
+                              data->set.max_send_speed,
+                              data->progress.ul_limit_start,
+                              *nowp)) {
+      break;
+    }
 
   } while(0); /* just to break out from! */
 
@@ -866,6 +891,7 @@ static int select_bits_paused(struct Curl_easy *data, int select_bits)
  * be read and written to/from the connection.
  */
 CURLcode Curl_readwrite(struct Curl_easy *data,
+                        struct curltime *nowp,
                         bool *done)
 {
   struct connectdata *conn = data->conn;
@@ -922,7 +948,7 @@ CURLcode Curl_readwrite(struct Curl_easy *data,
      the stream was rewound (in which case we have data in a
      buffer) */
   if((k->keepon & KEEP_RECV) && (select_bits & CURL_CSELECT_IN)) {
-    result = readwrite_data(data, k, &didwhat, done);
+    result = readwrite_data(data, k, nowp, &didwhat, done);
     if(result || *done)
       goto out;
   }
@@ -931,7 +957,7 @@ CURLcode Curl_readwrite(struct Curl_easy *data,
   if((k->keepon & KEEP_SEND) && (select_bits & CURL_CSELECT_OUT)) {
     /* write */
 
-    result = readwrite_upload(data, conn, &didwhat);
+    result = readwrite_upload(data, conn, nowp, &didwhat);
     if(result)
       goto out;
   }

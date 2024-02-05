@@ -45,7 +45,8 @@ typedef enum {
 
 CURLcode Curl_follow(struct Curl_easy *data, char *newurl,
                      followtype type);
-CURLcode Curl_readwrite(struct Curl_easy *data, bool *done);
+CURLcode Curl_readwrite(struct Curl_easy *data,
+                        struct curltime *nowp, bool *done);
 int Curl_single_getsock(struct Curl_easy *data,
                         struct connectdata *conn, curl_socket_t *socks);
 CURLcode Curl_fillreadbuffer(struct Curl_easy *data, size_t bytes,
