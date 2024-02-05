@@ -250,6 +250,7 @@ static ssize_t Curl_xfer_recv_resp(struct Curl_easy *data,
  */
 static CURLcode readwrite_data(struct Curl_easy *data,
                                struct SingleRequest *k,
+                               struct curltime *nowp,
                                int *didwhat)
 {
   struct connectdata *conn = data->conn;
@@ -287,6 +288,15 @@ static CURLcode readwrite_data(struct Curl_easy *data,
        * The overall, timed, speed limiting is done in multi.c */
       if(total_received)
         break;
+
+      /* make sure not more than the max recv speed bytes downloaded at once */
+      if(data->set.max_recv_speed < (curl_off_t)bytestoread) {
+        const curl_off_t toread = data->set.max_recv_speed -
+          (data->progress.downloaded - data->progress.dl_limit_size) %
+            data->set.max_recv_speed;
+        bytestoread = (size_t)toread;
+      }
+
       if((size_t)data->set.max_recv_speed < bytestoread)
         bytestoread = (size_t)data->set.max_recv_speed;
     }
@@ -335,6 +345,14 @@ static CURLcode readwrite_data(struct Curl_easy *data,
     /* if we are PAUSEd or stopped receiving, leave the loop */
     if((k->keepon & KEEP_RECV_PAUSE) || !(k->keepon & KEEP_RECV))
       break;
+
+    if(Curl_pgrsLimitWaitTime(data->progress.downloaded,
+                              data->progress.dl_limit_size,
+                              data->set.max_recv_speed,
+                              data->progress.dl_limit_start,
+                              *nowp)) {
+      maxloops = 0;
+    }
 
   } while(maxloops--);
 
@@ -405,7 +423,7 @@ static int select_bits_paused(struct Curl_easy *data, int select_bits)
  * Curl_readwrite() is the low-level function to be called when data is to
  * be read and written to/from the connection.
  */
-CURLcode Curl_readwrite(struct Curl_easy *data)
+CURLcode Curl_readwrite(struct Curl_easy *data, struct curltime *nowp)
 {
   struct connectdata *conn = data->conn;
   struct SingleRequest *k = &data->req;
@@ -461,7 +479,7 @@ CURLcode Curl_readwrite(struct Curl_easy *data)
      the stream was rewound (in which case we have data in a
      buffer) */
   if((k->keepon & KEEP_RECV) && (select_bits & CURL_CSELECT_IN)) {
-    result = readwrite_data(data, k, &didwhat);
+    result = readwrite_data(data, k, nowp, &didwhat);
     if(result || data->req.done)
       goto out;
   }
