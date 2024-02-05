@@ -2910,6 +2910,14 @@ static CURLcode setopt_offt(struct Curl_easy *data, CURLoption option,
      */
     if(offt < 0)
       return CURLE_BAD_FUNCTION_ARGUMENT;
+    if(offt) {
+      if(!data->set.max_send_speed || offt < data->set.max_send_speed / 2) {
+        /* if the new speed limit is down, reset the limit counters for
+           applying the new speed limit as soon as possible */
+        data->progress.ul.limit.start = Curl_now();
+        data->progress.ul.limit.start_size = data->progress.ul.cur_size;
+      }
+    }
     data->set.max_send_speed = offt;
     break;
   case CURLOPT_MAX_RECV_SPEED_LARGE:
@@ -2919,6 +2927,14 @@ static CURLcode setopt_offt(struct Curl_easy *data, CURLoption option,
      */
     if(offt < 0)
       return CURLE_BAD_FUNCTION_ARGUMENT;
+    if(offt) {
+      if(!data->set.max_recv_speed || offt < data->set.max_recv_speed / 2) {
+        /* if the new speed limit is down, reset the limit counters for
+           applying the new speed limit as soon as possible */
+        data->progress.dl.limit.start = Curl_now();
+        data->progress.dl.limit.start_size = data->progress.dl.cur_size;
+      }
+    }
     data->set.max_recv_speed = offt;
     break;
   case CURLOPT_RESUME_FROM_LARGE:
