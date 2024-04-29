@@ -95,6 +95,19 @@ int curlx_win32_open(const char *filename, int oflag, ...)
 #ifdef _UNICODE
   int result = -1;
   wchar_t *filename_w = curlx_convert_UTF8_to_wchar(filename);
+  if(!(filename_w[0] == '\\' && filename_w[1] == '\\')
+     && wcslen(filename_w) > MAX_PATH) {
+    /* Non UNC prefixed path \\ (eg \\?\C:\foo) is too long.
+       Unlike _open(), _wopen() does not support long DOS paths. */
+    char *filename_long = malloc(strlen(filename) + 4 + 1);
+    if(filename_long) {
+      strcpy(filename_long, "\\\\?\\");
+      strcpy(filename_long + 4, filename);
+      curlx_unicodefree(filename_w);
+      filename_w = curlx_convert_UTF8_to_wchar(filename_long);
+      free(filename_long);
+    }
+  }
 #endif
 
   va_list param;
