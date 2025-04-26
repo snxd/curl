@@ -78,6 +78,8 @@ CURLcode Curl_addrinfo_callback(struct Curl_easy *data,
       dns = Curl_cache_addr(data, ai,
                             data->conn->host.dispname, 0,
                             data->state.async.port, FALSE);
+      fprintf(stderr, "B: data->state.async.port = %d\n", data->state.async.port);
+      fprintf(stderr, "G: data->conn->localport = %d\n", data->conn->localport);
       if(data->share)
         Curl_share_unlock(data, CURL_LOCK_DATA_DNS);
 

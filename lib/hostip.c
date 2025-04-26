@@ -361,6 +361,7 @@ Curl_fetch_addr(struct Curl_easy *data,
                 const char *hostname,
                 int port)
 {
+  fprintf(stderr, "Curl_fetch_addr(%s, %d)\n", hostname, port);
   struct Curl_dns_entry *dns = NULL;
 
   if(data->share)
@@ -476,6 +477,10 @@ Curl_cache_addr(struct Curl_easy *data,
                 int port,
                 bool permanent)
 {
+  if (hostlen)
+    fprintf(stderr, "Curl_cache_addr(%.*s, %d)\n", (int)hostlen, hostname, port);
+  else
+    fprintf(stderr, "Curl_cache_addr(%s, %d)\n", hostname, port);
   char entry_id[MAX_HOSTCACHE_LEN];
   size_t entry_len;
   struct Curl_dns_entry *dns;
